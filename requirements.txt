@@ -1,0 +1,29 @@
+# Scraping and API Access
+telethon
+python-dotenv
+
+# Database and ORM
+psycopg2-binary
+sqlalchemy
+
+# Data Transformation (dbt)
+dbt-postgres
+
+# Data Enrichment (Object Detection)
+ultralytics
+opencv-python-headless
+pandas
+
+# API Development
+fastapi
+uvicorn
+pydantic
+
+# Orchestration
+dagster
+dagster-webserver
+dagster-postgres  # Recommended for database integration
+dagster-dbt       # Recommended for dbt integration
+
+# Testing
+pytest
