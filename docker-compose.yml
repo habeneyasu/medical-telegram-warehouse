@@ -1,0 +1,146 @@
+services:
+  # PostgreSQL Database for Data Warehouse
+  postgres:
+    image: postgres:15-alpine
+    container_name: medical_warehouse_db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-medical_warehouse}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - medical_warehouse_network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Main Application Service (Scraper/API)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: medical_warehouse_app
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-medical_warehouse}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - telegram_session:/app/.telethon
+    ports:
+      - "${API_PORT:-8000}:8000"  # FastAPI
+      - "${DAGSTER_PORT:-3000}:3000"  # Dagster
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - medical_warehouse_network
+    command: python3 scripts/run_scraper.py
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+  # FastAPI Service (Alternative: Run API separately)
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: medical_warehouse_api
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-medical_warehouse}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    ports:
+      - "8001:8000"  # FastAPI on different port
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - medical_warehouse_network
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+    profiles:
+      - api  # Only start with --profile api
+
+  # Dagster Webserver
+  dagster:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: medical_warehouse_dagster
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-medical_warehouse}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      DAGSTER_HOME: /app/dagster_home
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - dagster_storage:/app/dagster_home
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - medical_warehouse_network
+    command: dagster dev -f pipeline.py --host 0.0.0.0 --port 3000
+    restart: unless-stopped
+    profiles:
+      - dagster  # Only start with --profile dagster
+
+volumes:
+  postgres_data:
+    driver: local
+  dagster_storage:
+    driver: local
+  telegram_session:
+    driver: local
+
+networks:
+  medical_warehouse_network:
+    driver: bridge

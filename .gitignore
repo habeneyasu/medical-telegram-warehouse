@@ -71,6 +71,11 @@ dbt_packages/
 profiles.yml
 *.profiles.yml
 
+# Telegram session files
+*.session
+*.session-journal
+telegram_scraper.session*
+
 # OS
 .DS_Store
 Thumbs.db
