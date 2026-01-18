@@ -79,3 +79,7 @@ telegram_scraper.session*
 # OS
 .DS_Store
 Thumbs.db
+
+# Documentation (keep only README.md)
+*.md
+!README.md

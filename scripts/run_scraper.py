@@ -46,8 +46,12 @@ async def run_scraper(channels: list = None, limit: int = None):
         sys.exit(1)
     
     # Use default channels if none specified
+    # Skip lobelia4cosmetics and CheMed123 since data is already loaded
+    # Focus on tikvahpharma
     if channels is None:
-        channels = get_medical_channels()
+        channels = ['tikvahpharma']  # Only scrape tikvahpharma
+        print(f"Note: Skipping 'lobelia4cosmetics' and 'CheMed123' - data already loaded")
+        print(f"      Scraping only 'tikvahpharma'")
     
     # Initialize scraper
     scraper = TelegramScraper(api_id, api_hash)

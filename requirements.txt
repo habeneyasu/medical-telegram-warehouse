@@ -8,6 +8,7 @@ sqlalchemy
 
 # Data Transformation (dbt)
 dbt-postgres
+dbt-utils
 
 # Data Enrichment (Object Detection)
 ultralytics

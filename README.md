@@ -1,114 +1,90 @@
 # Medical Telegram Warehouse
 
-End-to-end ELT data pipeline for scraping, transforming, and analyzing medical product data from Telegram channels in Ethiopia.
-
-## Overview
-
-This project implements a modern data pipeline that:
-- Extracts messages and images from Telegram channels
-- Loads raw data into PostgreSQL data warehouse
-- Transforms data using dbt into dimensional star schema
-- Enriches data using YOLO object detection
-- Exposes insights through FastAPI REST API
-- Orchestrates pipeline using Dagster
+End-to-end ELT pipeline for scraping, transforming, and analyzing medical product data from Telegram channels.
 
 ## Quick Start
 
-### Prerequisites
-- Python 3.10+
-- PostgreSQL 12+
-- Docker & Docker Compose (optional)
-
-### Installation
+### Setup
 
 ```bash
-# Clone repository
-git clone <repository-url>
-cd medical-telegram-warehouse
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
 # Install dependencies
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 
 # Configure environment
 cp .env.example .env
-# Edit .env with your Telegram API credentials
+# Add Telegram API credentials from https://my.telegram.org
 ```
 
-### Telegram API Setup
-
-1. Visit [my.telegram.org](https://my.telegram.org)
-2. Create application in "API development tools"
-3. Add credentials to `.env`:
-   ```env
-   TELEGRAM_API_ID=your_api_id
-   TELEGRAM_API_HASH=your_api_hash
-   ```
-
-## Usage
-
-### Run Scraper
+### Run Pipeline
 
 ```bash
-# Default channels
+# 1. Scrape Telegram channels
 python3 scripts/run_scraper.py
 
-# Custom channels and limits
-python3 scripts/run_scraper.py --channels lobelia4cosmetics tikvahpharma --limit 100
+# 2. Load raw data to PostgreSQL
+python3 scripts/load_raw_to_postgres.py
+
+# 3. Transform with dbt
+cd medical_warehouse
+export POSTGRES_PASSWORD=your_password
+dbt deps
+dbt run
+dbt test
 ```
 
-### Docker
+## Architecture
 
-```bash
-# Start services
-docker-compose up -d
+```
+Telegram Channels → Scraper → Data Lake (JSON/Images) → PostgreSQL → dbt → Star Schema
+```
 
-# View logs
-docker-compose logs -f app
+**Data Flow:**
+1. **Extract**: Scrape messages and images from Telegram
+2. **Load**: Store raw data in PostgreSQL `raw` schema
+3. **Transform**: dbt creates `staging` and `marts` schemas (star schema)
 
-# Stop services
-docker-compose down
+## Configuration
+
+**Telegram API** (`.env`):
+```env
+TELEGRAM_API_ID=your_api_id
+TELEGRAM_API_HASH=your_api_hash
+```
+
+**Image Limits** (`.env`):
+```env
+MAX_IMAGES_CheMed123=1200
+MAX_IMAGES_lobelia4cosmetics=1500
+MAX_IMAGES_tikvahpharma=1700
+MAX_MESSAGES_tikvahpharma=3000
+```
+
+**Database** (`.env`):
+```env
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_DB=medical_warehouse
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=your_password
 ```
 
 ## Data Structure
 
 ```
 data/raw/
-├── images/
-│   └── {channel_name}/{message_id}.jpg
-└── telegram_messages/
-    └── YYYY-MM-DD/{channel_name}.json
+├── images/{channel_name}/{message_id}.jpg
+└── telegram_messages/YYYY-MM-DD/{channel_name}.json
 ```
 
-**Date-first partitioning** optimizes for:
-- Date-range queries
-- Incremental loading
-- Database partitioning
-- dbt incremental models
-
-## Configuration
-
-### Channel-Specific Image Limits
-
-Configure in `.env`:
-```env
-MAX_IMAGES_CheMed123=1200
-MAX_IMAGES_lobelia4cosmetics=1500
-MAX_IMAGES_tikvahpharma=1700
-MAX_IMAGES=1500  # Default
-```
-
-## Features
-
-- ✅ Automatic rate limiting and error handling
-- ✅ Per-channel image download limits
-- ✅ Date-partitioned data storage
-- ✅ Comprehensive logging
-- ✅ Message deduplication
-- ✅ Progress tracking
+**Database Schemas:**
+- `raw` - Raw scraped data
+- `staging` - Cleaned and standardized data (dbt views)
+- `marts` - Dimensional star schema (dbt tables)
+  - `dim_channels` - Channel dimension
+  - `dim_dates` - Date dimension
+  - `fct_messages` - Messages fact table
 
 ## Supported Channels
 
@@ -116,30 +92,39 @@ MAX_IMAGES=1500  # Default
 - `lobelia4cosmetics` - Lobelia Cosmetics
 - `tikvahpharma` - Tikvah Pharma
 
+## Project Structure
+
+```
+├── src/              # Scraper and utilities
+├── scripts/          # Data loading and utility scripts
+├── medical_warehouse/ # dbt project (staging + marts)
+├── api/              # FastAPI application (Task 4)
+├── data/             # Data lake (raw/processed)
+└── tests/            # Unit tests
+```
+
+## Features
+
+- ✅ Per-channel image and message limits
+- ✅ Date-partitioned storage
+- ✅ Star schema data warehouse
+- ✅ Comprehensive data quality tests
+- ✅ Automatic rate limiting
+- ✅ Progress tracking and logging
+
 ## Development
 
 ```bash
+# Test database connection
+python3 scripts/test_db_connection.py
+
 # Run tests
 pytest tests/
 
 # Format code
-black src/ scripts/ api/
-
-# Lint code
-flake8 src/ scripts/ api/
-```
-
-## Project Structure
-
-```
-├── api/              # FastAPI application
-├── src/              # Source code (scraper, utilities)
-├── scripts/          # Utility scripts
-├── medical_warehouse/ # dbt project
-├── data/             # Data lake (raw/processed)
-└── tests/           # Unit tests
+black src/ scripts/
 ```
 
 ## License
 
-MIT License - See LICENSE file for details.
+MIT License

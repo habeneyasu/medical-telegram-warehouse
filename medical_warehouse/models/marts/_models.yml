@@ -1,0 +1,4 @@
+version: 2
+
+# Model-level descriptions only (column descriptions are in schema.yml)
+# This file provides high-level documentation for models

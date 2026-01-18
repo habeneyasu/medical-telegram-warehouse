@@ -47,6 +47,11 @@ logger = logging.getLogger(__name__)
 # Default: 1500 if not specified for a channel
 DEFAULT_MAX_IMAGES = int(os.getenv('MAX_IMAGES', '1500'))
 
+# Maximum number of messages to scrape per channel (from environment)
+# Format: MAX_MESSAGES_CHANNELNAME=limit
+# Example: MAX_MESSAGES_tikvahpharma=3000
+# Default: None (no limit) if not specified for a channel
+
 
 class TelegramScraper:
     """
@@ -104,6 +109,9 @@ class TelegramScraper:
         self.downloaded_images_count = {}  # {channel_name: count}
         self.channel_max_images = self._load_channel_limits()
         
+        # Track message limits per channel
+        self.channel_max_messages = self._load_channel_message_limits()
+        
         # Track which channels have reached their image limit (to avoid repeated warnings)
         self.channel_limit_reached = set()  # Set of channel names that reached limit
         
@@ -147,6 +155,54 @@ class TelegramScraper:
                 limits[channel] = DEFAULT_MAX_IMAGES
         
         return limits
+    
+    def _load_channel_message_limits(self) -> Dict[str, Optional[int]]:
+        """
+        Load channel-specific message limits from environment variables.
+        
+        Format: MAX_MESSAGES_{CHANNEL_NAME}=limit
+        Example: MAX_MESSAGES_tikvahpharma=3000
+        
+        Returns:
+            Dictionary mapping channel names to their message limits (None if no limit)
+        """
+        limits = {}
+        # Load limits for known channels
+        channel_names = ['CheMed123', 'lobelia4cosmetics', 'tikvahpharma']
+        
+        for channel in channel_names:
+            env_key = f'MAX_MESSAGES_{channel}'
+            limit = os.getenv(env_key)
+            if limit:
+                try:
+                    limits[channel] = int(limit)
+                    logger.info(f"Loaded message limit for {channel}: {limits[channel]}")
+                except ValueError:
+                    logger.warning(f"Invalid MAX_MESSAGES_{channel} value: {limit}. Ignoring.")
+                    limits[channel] = None
+            else:
+                limits[channel] = None
+        
+        return limits
+    
+    def get_max_messages_for_channel(self, channel_name: str) -> Optional[int]:
+        """
+        Get the maximum message limit for a specific channel.
+        
+        Args:
+            channel_name: Name of the channel (can be display name or username)
+            
+        Returns:
+            Maximum number of messages allowed for this channel, or None if no limit
+        """
+        # Get config channel name
+        config_channel = self.get_config_channel_name(channel_name)
+        
+        # Check if limit exists for this channel
+        if config_channel in self.channel_max_messages:
+            return self.channel_max_messages[config_channel]
+        
+        return None
     
     def get_max_images_for_channel(self, channel_name: str) -> int:
         """
@@ -291,6 +347,13 @@ class TelegramScraper:
             # Get config channel name for limit tracking
             config_channel = self.get_config_channel_name(channel_name)
             max_images = self.get_max_images_for_channel(channel_name)
+            max_messages = self.get_max_messages_for_channel(channel_name)
+            
+            # Override limit parameter if channel has message limit configured
+            if max_messages is not None:
+                if limit is None or limit > max_messages:
+                    limit = max_messages
+                    logger.info(f"Using channel-specific message limit: {max_messages} for {channel_name}")
             
             # Initialize counter if needed and count existing images
             if config_channel not in self.downloaded_images_count:
@@ -327,6 +390,8 @@ class TelegramScraper:
             
             # Scrape messages
             logger.info(f"Starting to iterate messages from {channel_name}...")
+            if max_messages:
+                logger.info(f"Message limit for {channel_name}: {max_messages}")
             message_count = 0
             async for message in self.client.iter_messages(
                 entity,
@@ -334,18 +399,24 @@ class TelegramScraper:
                 offset_date=offset_date
             ):
                 try:
+                    # Check if message limit reached before processing
+                    if max_messages is not None and message_count >= max_messages:
+                        logger.info(
+                            f"Message limit reached for {channel_name} "
+                            f"({message_count}/{max_messages}). Stopping scraping."
+                        )
+                        break
+                    
                     message_count += 1
+                    
                     # Log progress every 50 messages (more frequent for visibility)
                     if message_count % 50 == 0:
+                        progress_msg = f"Scraping {channel_name}: {message_count} messages processed"
+                        if max_messages:
+                            progress_msg += f" (limit: {max_messages})"
                         if config_channel in self.channel_limit_reached:
-                            logger.info(
-                                f"Scraping text messages from {channel_name}: "
-                                f"{message_count} messages processed (images skipped - limit reached)"
-                            )
-                        else:
-                            logger.info(
-                                f"Scraping {channel_name}: {message_count} messages processed"
-                            )
+                            progress_msg += " (images skipped - limit reached)"
+                        logger.info(progress_msg)
                     # Also log first message to confirm loop is working
                     elif message_count == 1:
                         logger.info(f"Processing first message from {channel_name}...")
@@ -362,10 +433,15 @@ class TelegramScraper:
                                 channel_name,
                                 message_data['message_id']
                             )
-                            # If limit reached, log info but continue scraping text messages
+                            # If image limit reached, check if we should stop
                             if not downloaded and config_channel in self.channel_limit_reached:
-                                # Already logged warning once, just continue without downloading images
-                                pass
+                                # If message limit also reached, stop scraping
+                                if max_messages is not None and message_count >= max_messages:
+                                    logger.info(
+                                        f"Both image limit ({max_images}) and message limit ({max_messages}) "
+                                        f"reached for {channel_name}. Stopping."
+                                    )
+                                    break
                     
                     # Handle rate limiting
                     await asyncio.sleep(0.5)  # Be respectful to Telegram API
