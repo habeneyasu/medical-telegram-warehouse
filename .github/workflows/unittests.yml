@@ -1,0 +1,123 @@
+name: Unit Tests
+
+on:
+  push:
+    branches: [ main, develop, master ]
+  pull_request:
+    branches: [ main, develop, master ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          postgresql-client \
+          libpq-dev \
+          libgl1 \
+          libglib2.0-0
+    
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov pytest-asyncio
+    
+    - name: Create necessary directories
+      run: |
+        mkdir -p data/raw/telegram_messages \
+                 data/raw/images \
+                 data/processed \
+                 logs
+    
+    - name: Run tests with pytest
+      env:
+        TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+        TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+        MAX_IMAGES_CheMed123: 1200
+        MAX_IMAGES_lobelia4cosmetics: 1500
+        MAX_IMAGES_tikvahpharma: 1700
+        MAX_IMAGES: 1500
+      run: |
+        pytest tests/ -v --cov=src --cov=api --cov-report=xml --cov-report=term-missing
+    
+    - name: Upload coverage reports
+      uses: codecov/codecov-action@v3
+      if: matrix.python-version == '3.12'
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+        cache: 'pip'
+    
+    - name: Install linting dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 black isort mypy
+    
+    - name: Run black (code formatter check)
+      run: |
+        black --check --diff src/ scripts/ api/ tests/
+      continue-on-error: true
+    
+    - name: Run isort (import sorting check)
+      run: |
+        isort --check-only --diff src/ scripts/ api/ tests/
+      continue-on-error: true
+    
+    - name: Run flake8 (linting)
+      run: |
+        flake8 src/ scripts/ api/ tests/ --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 src/ scripts/ api/ tests/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+      continue-on-error: true
+    
+    - name: Run mypy (type checking)
+      run: |
+        mypy src/ api/ --ignore-missing-imports
+      continue-on-error: true
+
+  build-docker:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Build Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: false
+        tags: medical-telegram-warehouse:test
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
