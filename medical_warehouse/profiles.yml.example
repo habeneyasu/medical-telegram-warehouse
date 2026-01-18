@@ -1,0 +1,22 @@
+# dbt profiles.yml example
+# Copy this file to profiles.yml and update with your database credentials
+# Or use environment variables (recommended for security)
+
+medical_warehouse:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('POSTGRES_HOST', 'localhost') }}"
+      port: "{{ env_var('POSTGRES_PORT', '5432') | as_number }}"
+      user: "{{ env_var('POSTGRES_USER', 'postgres') }}"
+      password: "{{ env_var('POSTGRES_PASSWORD', 'your_password_here') }}"
+      dbname: "{{ env_var('POSTGRES_DB', 'medical_warehouse') }}"
+      schema: staging
+      threads: 4
+      keepalives_idle: 0
+
+# Usage:
+# 1. Copy this file: cp profiles.yml.example profiles.yml
+# 2. Update password or use environment variables
+# 3. Or rely entirely on environment variables (current setup)
