@@ -19,6 +19,7 @@ cp .env.example .env
 
 ### Run Pipeline
 
+**Option 1: Manual Execution**
 ```bash
 # 1. Scrape Telegram channels
 python3 scripts/run_scraper.py
@@ -35,8 +36,15 @@ bash scripts/run_dbt.sh deps
 bash scripts/run_dbt.sh run
 bash scripts/run_dbt.sh test
 
-# 5. Start API
+# 5. Start API (optional)
 bash scripts/run_api.sh
+```
+
+**Option 2: Dagster Orchestration (Recommended)**
+```bash
+# Start Dagster UI and run entire pipeline
+bash scripts/run_dagster.sh
+# Access UI at http://localhost:3000
 ```
 
 ## Architecture
@@ -45,7 +53,7 @@ bash scripts/run_api.sh
 Telegram → Scraper → Data Lake → YOLOv8 → PostgreSQL → dbt → Star Schema → FastAPI
 ```
 
-**Data Flow:**
+**Pipeline Steps:**
 1. **Extract**: Scrape messages and images from Telegram
 2. **Enrich**: YOLOv8 object detection and image classification
 3. **Load**: Store in PostgreSQL `raw` schema
@@ -80,6 +88,7 @@ MAX_IMAGES_tikvahpharma=1700
 ├── scripts/                # Data loading and utility scripts
 ├── medical_warehouse/      # dbt project (staging + marts)
 ├── api/                    # FastAPI analytical API
+├── pipeline.py             # Dagster pipeline definition
 ├── data/                   # Data lake (raw/processed)
 ├── tests/                  # Unit tests
 └── logs/                   # Application logs
@@ -91,6 +100,7 @@ MAX_IMAGES_tikvahpharma=1700
 - ✅ **Image Detection**: YOLOv8n object detection and classification
 - ✅ **Data Warehouse**: Star schema with dbt (60+ tests)
 - ✅ **Analytical API**: FastAPI with 4 endpoints, rate limiting, caching
+- ✅ **Pipeline Orchestration**: Dagster for automated, observable workflows
 - ✅ **Infrastructure**: Connection pooling, structured logging, error handling
 
 ## Image Classification
@@ -101,15 +111,16 @@ Images are automatically classified into:
 - **lifestyle**: Person only
 - **other**: Neither detected
 
-## API Endpoints
+## API
 
+**Endpoints:**
 - `GET /api/reports/top-products` - Most mentioned products
 - `GET /api/channels/{name}/activity` - Channel activity trends
 - `GET /api/search/messages` - Search messages by keyword
 - `GET /api/reports/visual-content` - Image usage statistics
 
 **Documentation**: http://localhost:8000/docs  
-**See**: `api/README.md` for detailed API documentation
+**Details**: See `api/README.md`
 
 ## Database Schemas
 
@@ -118,6 +129,16 @@ Images are automatically classified into:
 - `staging_marts` - Star schema (dbt tables)
   - `dim_channels`, `dim_dates`
   - `fct_messages`, `fct_image_detections`
+
+## Pipeline Orchestration
+
+**Dagster Pipeline:**
+- 5 operations with proper dependencies
+- Daily schedule (2 AM, configurable)
+- Observable execution with logs and metrics
+- Configurable channels via UI or environment
+
+**Start:** `bash scripts/run_dagster.sh` → http://localhost:3000
 
 ## Development
 
@@ -135,7 +156,7 @@ bash scripts/run_dbt.sh test
 
 ## Troubleshooting
 
-**Database connection issues:**
+**Database connection:**
 ```bash
 python3 scripts/test_db_connection.py
 ```
