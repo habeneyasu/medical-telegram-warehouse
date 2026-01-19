@@ -8,7 +8,8 @@ sqlalchemy
 
 # Data Transformation (dbt)
 dbt-postgres
-dbt-utils
+# Note: dbt-utils is installed via dbt packages (see medical_warehouse/packages.yml)
+# Run: dbt deps
 
 # Data Enrichment (Object Detection)
 ultralytics
@@ -17,8 +18,9 @@ pandas
 
 # API Development
 fastapi
-uvicorn
+uvicorn[standard]
 pydantic
+slowapi
 
 # Orchestration
 dagster
@@ -28,3 +30,4 @@ dagster-dbt       # Recommended for dbt integration
 
 # Testing
 pytest
+requests  # For API testing
