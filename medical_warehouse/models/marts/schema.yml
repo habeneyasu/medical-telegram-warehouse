@@ -129,3 +129,61 @@ models:
           combination_of_columns:
             - message_id
             - channel_key
+
+  - name: fct_image_detections
+    description: |
+      Fact table containing YOLOv8 object detection results for images.
+      Links to dim_channels and dim_dates through foreign keys.
+      Enables analysis of visual content patterns and engagement by image category.
+    columns:
+      - name: message_id
+        description: "Message identifier (links to fct_messages)"
+        tests:
+          - not_null
+      - name: channel_key
+        description: "Foreign key to dim_channels"
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_channels')
+                field: channel_key
+      - name: date_key
+        description: "Foreign key to dim_dates"
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_dates')
+                field: date_key
+      - name: image_category
+        description: "Image classification: promotional, product_display, lifestyle, or other"
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['promotional', 'product_display', 'lifestyle', 'other']
+      - name: total_detections
+        description: "Total number of objects detected in the image"
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: true
+      - name: max_confidence
+        description: "Highest confidence score among all detections"
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 1
+              inclusive: true
+      - name: view_count
+        description: "Number of views on the message"
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - message_id
+            - channel_key

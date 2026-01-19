@@ -32,3 +32,24 @@ sources:
             description: "Timestamp when message was scraped"
           - name: loaded_at
             description: "Timestamp when message was loaded to database"
+      - name: image_detections
+        description: "YOLOv8 object detection results for scraped images"
+        columns:
+          - name: message_id
+            description: "Unique message identifier (links to telegram_messages)"
+          - name: channel_name
+            description: "Name of the Telegram channel"
+          - name: image_path
+            description: "Path to the image file"
+          - name: detected_classes
+            description: "Comma-separated list of detected object classes"
+          - name: total_detections
+            description: "Total number of objects detected in the image"
+          - name: max_confidence
+            description: "Highest confidence score among all detections"
+          - name: image_category
+            description: "Classification: promotional, product_display, lifestyle, or other"
+          - name: processed_at
+            description: "Timestamp when YOLO detection was run"
+          - name: loaded_at
+            description: "Timestamp when detection was loaded to database"

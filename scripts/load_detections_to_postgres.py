@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
-Load raw JSON data from data lake into PostgreSQL raw schema.
+Load YOLO detection results from CSV into PostgreSQL raw schema.
 
 This script:
-1. Reads JSON files from data/raw/telegram_messages/
-2. Loads them into raw.telegram_messages table in PostgreSQL
+1. Reads CSV file from data/processed/image_detections.csv
+2. Loads them into raw.image_detections table in PostgreSQL
 3. Handles duplicates and data validation
 """
 
-import json
 import sys
 from pathlib import Path
 from typing import Dict, List
@@ -29,7 +28,10 @@ from src.database import (
 from src.logger_config import setup_logger
 
 # Setup logger
-logger = setup_logger(__name__, log_file="load_raw_to_postgres.log")
+logger = setup_logger(__name__, log_file="load_detections_to_postgres.log")
+
+# CSV file path
+DETECTIONS_CSV = Path("data/processed/image_detections.csv")
 
 
 def create_raw_schema():
@@ -46,109 +48,96 @@ def create_raw_schema():
         return False
 
 
-def create_raw_table():
-    """Create raw.telegram_messages table if it doesn't exist."""
+def create_detections_table():
+    """Create raw.image_detections table if it doesn't exist."""
     create_table_sql = """
-    CREATE TABLE IF NOT EXISTS raw.telegram_messages (
+    CREATE TABLE IF NOT EXISTS raw.image_detections (
         id SERIAL PRIMARY KEY,
-        message_id BIGINT,
-        channel_name VARCHAR(255),
-        message_date TIMESTAMP,
-        message_text TEXT,
-        has_media BOOLEAN,
+        message_id BIGINT NOT NULL,
+        channel_name VARCHAR(255) NOT NULL,
         image_path VARCHAR(500),
-        views INTEGER,
-        forwards INTEGER,
-        is_reply BOOLEAN,
-        reply_to_msg_id BIGINT,
-        scraped_at TIMESTAMP,
+        detected_classes TEXT,
+        total_detections INTEGER DEFAULT 0,
+        max_confidence NUMERIC(5, 4),
+        image_category VARCHAR(50),
+        processed_at TIMESTAMP,
         loaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(message_id, channel_name, message_date)
+        UNIQUE(message_id, channel_name)
     );
     
-    CREATE INDEX IF NOT EXISTS idx_message_id ON raw.telegram_messages(message_id);
-    CREATE INDEX IF NOT EXISTS idx_channel_name ON raw.telegram_messages(channel_name);
-    CREATE INDEX IF NOT EXISTS idx_message_date ON raw.telegram_messages(message_date);
+    CREATE INDEX IF NOT EXISTS idx_detections_message_id ON raw.image_detections(message_id);
+    CREATE INDEX IF NOT EXISTS idx_detections_channel_name ON raw.image_detections(channel_name);
+    CREATE INDEX IF NOT EXISTS idx_detections_category ON raw.image_detections(image_category);
     """
     
     try:
         with get_db_connection() as conn:
             conn.execute(text(create_table_sql))
             conn.commit()
-            logger.info("✓ Raw table created/verified")
+            logger.info("✓ Image detections table created/verified")
             return True
     except SQLAlchemyError as e:
-        logger.error(f"Error creating raw table: {e}", exc_info=True)
+        logger.error(f"Error creating detections table: {e}", exc_info=True)
         return False
     except Exception as e:
-        logger.error(f"Unexpected error creating raw table: {e}", exc_info=True)
+        logger.error(f"Unexpected error creating detections table: {e}", exc_info=True)
         return False
 
 
-def load_json_files(data_dir: Path) -> List[Dict]:
-    """Load all JSON files from data lake directory structure."""
-    messages = []
-    json_files = list(data_dir.rglob("*.json"))
+def load_csv_file(csv_path: Path) -> pd.DataFrame:
+    """Load CSV file into DataFrame."""
+    if not csv_path.exists():
+        logger.error(f"CSV file not found: {csv_path}")
+        raise FileNotFoundError(f"CSV file not found: {csv_path}")
     
-    print(f"Found {len(json_files)} JSON files to process")
+    logger.info(f"Loading CSV file: {csv_path}")
     
-    for json_file in json_files:
-        try:
-            with open(json_file, 'r', encoding='utf-8') as f:
-                file_messages = json.load(f)
-                
-                # Handle both single dict and list of dicts
-                if isinstance(file_messages, dict):
-                    file_messages = [file_messages]
-                
-                for msg in file_messages:
-                    if isinstance(msg, dict):
-                        messages.append(msg)
-            
-            logger.debug(f"Loaded {len(file_messages)} messages from {json_file.name}")
-            
-        except json.JSONDecodeError as e:
-            logger.warning(f"Error reading {json_file}: {e}")
-            continue
-        except Exception as e:
-            logger.error(f"Error processing {json_file}: {e}", exc_info=True)
-            continue
-    
-    return messages
+    try:
+        df = pd.read_csv(csv_path)
+        logger.info(f"✓ Loaded {len(df)} rows from CSV")
+        return df
+    except pd.errors.EmptyDataError as e:
+        logger.error(f"CSV file is empty: {csv_path}")
+        raise
+    except pd.errors.ParserError as e:
+        logger.error(f"Error parsing CSV file: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error reading CSV: {e}", exc_info=True)
+        raise
 
 
-def prepare_dataframe(messages: List[Dict]) -> pd.DataFrame:
-    """Convert messages list to DataFrame with proper data types."""
-    if not messages:
-        return pd.DataFrame()
+def prepare_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """Prepare DataFrame with proper data types."""
+    if df.empty:
+        return df
     
-    df = pd.DataFrame(messages)
+    # Convert message_id to integer
+    if 'message_id' in df.columns:
+        df['message_id'] = pd.to_numeric(df['message_id'], errors='coerce').astype('Int64')
     
-    # Convert message_date to datetime
-    if 'message_date' in df.columns:
-        df['message_date'] = pd.to_datetime(df['message_date'], errors='coerce')
+    # Convert total_detections to integer
+    if 'total_detections' in df.columns:
+        df['total_detections'] = pd.to_numeric(df['total_detections'], errors='coerce').astype('Int64').fillna(0)
     
-    # Convert scraped_at to datetime
-    if 'scraped_at' in df.columns:
-        df['scraped_at'] = pd.to_datetime(df['scraped_at'], errors='coerce')
+    # Convert max_confidence to float
+    if 'max_confidence' in df.columns:
+        df['max_confidence'] = pd.to_numeric(df['max_confidence'], errors='coerce').astype('float64')
     
-    # Ensure boolean columns
-    bool_columns = ['has_media', 'is_reply']
-    for col in bool_columns:
-        if col in df.columns:
-            df[col] = df[col].astype('boolean', errors='ignore')
-    
-    # Ensure integer columns
-    int_columns = ['message_id', 'views', 'forwards', 'reply_to_msg_id']
-    for col in int_columns:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce').astype('Int64')
+    # Convert processed_at to datetime
+    if 'processed_at' in df.columns:
+        df['processed_at'] = pd.to_datetime(df['processed_at'], errors='coerce')
     
     # Select and order columns
     columns = [
-        'message_id', 'channel_name', 'message_date', 'message_text',
-        'has_media', 'image_path', 'views', 'forwards',
-        'is_reply', 'reply_to_msg_id', 'scraped_at'
+        'message_id',
+        'channel_name',
+        'image_path',
+        'detected_classes',
+        'total_detections',
+        'max_confidence',
+        'image_category',
+        'processed_at'
     ]
     
     # Only include columns that exist
@@ -164,7 +153,7 @@ def load_to_postgres(df: pd.DataFrame):
         logger.warning("No data to load")
         return 0
     
-    table_name = "raw.telegram_messages"
+    table_name = "raw.image_detections"
     engine = get_db_engine()
     
     # Load in chunks to handle large datasets
@@ -173,7 +162,7 @@ def load_to_postgres(df: pd.DataFrame):
     loaded_rows = 0
     skipped_rows = 0
     
-    logger.info(f"Loading {total_rows} messages to {table_name}...")
+    logger.info(f"Loading {total_rows} detection results to {table_name}...")
     
     for i in range(0, total_rows, chunk_size):
         chunk = df.iloc[i:i + chunk_size]
@@ -181,7 +170,7 @@ def load_to_postgres(df: pd.DataFrame):
         try:
             # Use pandas to_sql with method='multi' for better performance
             chunk.to_sql(
-                name='telegram_messages',
+                name='image_detections',
                 schema='raw',
                 con=engine,
                 if_exists='append',
@@ -190,7 +179,7 @@ def load_to_postgres(df: pd.DataFrame):
             )
             
             loaded_rows += len(chunk)
-            logger.debug(f"Loaded {loaded_rows}/{total_rows} messages...")
+            logger.debug(f"Loaded {loaded_rows}/{total_rows} rows...")
             
         except SQLAlchemyError as e:
             # Handle duplicate key errors (expected due to UNIQUE constraint)
@@ -200,7 +189,7 @@ def load_to_postgres(df: pd.DataFrame):
                 for _, row in chunk.iterrows():
                     try:
                         row.to_frame().T.to_sql(
-                            name='telegram_messages',
+                            name='image_detections',
                             schema='raw',
                             con=engine,
                             if_exists='append',
@@ -219,7 +208,7 @@ def load_to_postgres(df: pd.DataFrame):
             logger.error(f"Unexpected error loading chunk {i//chunk_size + 1}: {e}", exc_info=True)
             continue
     
-    logger.info(f"✓ Successfully loaded {loaded_rows} messages to {table_name}")
+    logger.info(f"✓ Successfully loaded {loaded_rows} rows to {table_name}")
     if skipped_rows > 0:
         logger.info(f"  (Skipped {skipped_rows} duplicate rows)")
     
@@ -232,21 +221,38 @@ def get_table_stats():
         with get_db_connection() as conn:
             result = conn.execute(text("""
                 SELECT 
-                    COUNT(*) as total_messages,
+                    COUNT(*) as total_detections,
                     COUNT(DISTINCT channel_name) as unique_channels,
-                    MIN(message_date) as earliest_date,
-                    MAX(message_date) as latest_date
-                FROM raw.telegram_messages
+                    COUNT(DISTINCT message_id) as unique_messages,
+                    COUNT(DISTINCT image_category) as unique_categories
+                FROM raw.image_detections
             """))
             
             stats = result.fetchone()
             if stats:
                 logger.info("="*50)
-                logger.info("Data Warehouse Statistics")
+                logger.info("Image Detections Statistics")
                 logger.info("="*50)
-                logger.info(f"Total Messages: {stats[0]}")
+                logger.info(f"Total Detection Records: {stats[0]}")
                 logger.info(f"Unique Channels: {stats[1]}")
-                logger.info(f"Date Range: {stats[2]} to {stats[3]}")
+                logger.info(f"Unique Messages: {stats[2]}")
+                logger.info(f"Unique Categories: {stats[3]}")
+                
+                # Category breakdown
+                category_result = conn.execute(text("""
+                    SELECT 
+                        image_category,
+                        COUNT(*) as count,
+                        ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM raw.image_detections), 2) as percentage
+                    FROM raw.image_detections
+                    GROUP BY image_category
+                    ORDER BY count DESC
+                """))
+                
+                logger.info("\nCategory Breakdown:")
+                for row in category_result:
+                    logger.info(f"  {row[0]}: {row[1]} ({row[2]}%)")
+                
                 logger.info("="*50)
                 return stats
             return None
@@ -259,22 +265,21 @@ def get_table_stats():
 
 
 def main():
-    """Main function to load raw data to PostgreSQL."""
+    """Main function to load detection results to PostgreSQL."""
     logger.info("="*50)
-    logger.info("Loading Raw Data to PostgreSQL")
+    logger.info("Loading Image Detection Results to PostgreSQL")
     logger.info("="*50)
     
     try:
+        # Check CSV file exists
+        if not DETECTIONS_CSV.exists():
+            logger.error(f"CSV file not found: {DETECTIONS_CSV}")
+            logger.error("Please run: python3 src/yolo_detect.py first")
+            sys.exit(1)
+        
         # Test database connection
         if not test_connection():
             logger.error("Database connection test failed")
-            sys.exit(1)
-        
-        # Get data directory
-        data_dir = Path("data/raw/telegram_messages")
-        
-        if not data_dir.exists():
-            logger.error(f"Data directory not found: {data_dir}")
             sys.exit(1)
         
         # Create schema and table
@@ -282,23 +287,16 @@ def main():
             logger.error("Failed to create raw schema")
             sys.exit(1)
         
-        if not create_raw_table():
-            logger.error("Failed to create raw table")
+        if not create_detections_table():
+            logger.error("Failed to create detections table")
             sys.exit(1)
         
-        # Load JSON files
-        logger.info(f"Loading JSON files from {data_dir}...")
-        messages = load_json_files(data_dir)
-        
-        if not messages:
-            logger.warning("No messages found to load")
-            sys.exit(0)
-        
-        logger.info(f"✓ Loaded {len(messages)} total messages from JSON files")
+        # Load CSV file
+        df = load_csv_file(DETECTIONS_CSV)
         
         # Prepare DataFrame
         logger.info("Preparing data...")
-        df = prepare_dataframe(messages)
+        df = prepare_dataframe(df)
         
         if df.empty:
             logger.warning("No valid data to load")
@@ -317,6 +315,8 @@ def main():
         
     except KeyboardInterrupt:
         logger.warning("Process interrupted by user")
+        sys.exit(1)
+    except FileNotFoundError:
         sys.exit(1)
     except Exception as e:
         logger.error(f"Unexpected error in main: {e}", exc_info=True)

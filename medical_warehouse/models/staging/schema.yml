@@ -32,3 +32,29 @@ models:
         description: "Number of times message was forwarded"
         tests:
           - not_null
+  - name: stg_image_detections
+    description: "Staging model that cleans and standardizes raw image detection results"
+    columns:
+      - name: message_id
+        description: "Unique message identifier from Telegram"
+        tests:
+          - not_null
+      - name: channel_name
+        description: "Name of the Telegram channel"
+        tests:
+          - not_null
+      - name: image_category
+        description: "Image classification category"
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['promotional', 'product_display', 'lifestyle', 'other']
+      - name: total_detections
+        description: "Total number of objects detected"
+        tests:
+          - not_null
+      - name: max_confidence
+        description: "Highest confidence score"
+        tests:
+          - not_null
