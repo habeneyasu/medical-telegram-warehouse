@@ -76,6 +76,10 @@ profiles.yml
 *.session-journal
 telegram_scraper.session*
 
+# YOLO model files (downloaded automatically)
+*.pt
+yolov8*.pt
+
 # OS
 .DS_Store
 Thumbs.db
