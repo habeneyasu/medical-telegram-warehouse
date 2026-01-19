@@ -84,6 +84,7 @@ yolov8*.pt
 .DS_Store
 Thumbs.db
 
-# Documentation (keep only README.md)
+# Documentation (keep README files)
 *.md
 !README.md
+!api/README.md
